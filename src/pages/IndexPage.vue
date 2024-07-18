@@ -2,9 +2,15 @@
   <q-page class="row q-pt-xl">
     <div class="full-width q-px-xl">
       <div class="q-mb-xl">
-        <q-input v-model="tempData.name" label="姓名" />
-        <q-input v-model="tempData.age" label="年齡" />
-        <q-btn color="primary" class="q-mt-md">新增</q-btn>
+        <q-input ref="nameRef" :rules="nameRules" v-model="tempData.name" label="姓名" />
+        <q-input ref="ageRef" :rules="ageRules" type="number" v-model="tempData.age" label="年齡" />
+
+        <q-btn v-if="actionMode === 'add'" @click="addUser" color="primary" class="q-mt-md">新增</q-btn>
+
+        <div v-if="actionMode === 'edit'" class="q-gutter-xs">
+          <q-btn @click="editUser" color="warning" class="q-mt-md">更新</q-btn>
+          <q-btn @click="escapeEditMode" color="primary" class="q-mt-md">取消更新</q-btn>
+        </div>
       </div>
 
       <q-table
@@ -39,7 +45,7 @@
             </q-td>
             <q-td class="text-right" auto-width v-if="tableButtons.length > 0">
               <q-btn
-                @click="handleClickOption(btn, props.row)"
+                @click="handleClickOption(btn, props.row as UserModel)"
                 v-for="(btn, index) in tableButtons"
                 :key="index"
                 size="sm"
@@ -78,20 +84,24 @@
 </template>
 
 <script setup lang="ts">
-import axios from 'axios';
-import { QTableProps } from 'quasar';
-import { ref } from 'vue';
+import { QTableProps, Dialog, QInput } from 'quasar';
+import { ref, onBeforeMount, onMounted } from 'vue';
+import UserRepository from '../repositories/UserRepository';
+
 interface btnType {
   label: string;
   icon: string;
   status: string;
 }
-const blockData = ref([
-  {
-    name: 'test',
-    age: 25,
-  },
-]);
+
+const {
+  create: userCreate,
+  list: userList,
+  delete: userDelete,
+  update: userUpdate,
+} = new UserRepository();
+
+const blockData = ref<UserModel[]>([]);
 const tableConfig = ref([
   {
     label: '姓名',
@@ -120,12 +130,125 @@ const tableButtons = ref([
 ]);
 
 const tempData = ref({
+  id: '',
   name: '',
   age: '',
 });
-function handleClickOption(btn, data) {
-  // ...
+
+const actionMode = ref<'add' | 'edit'>('add');
+
+const nameRef = ref<QInput>();
+const ageRef = ref<QInput>();
+
+const nameRules = [
+  (val: string) => (val && val.length > 0) || '請輸入姓名',
+  (val: string) => (val && val[0] !== ' ') || '第一個字不能是空白',
+  (val: string) => (val && val.split('').reverse().join('')[0] !== ' ') || '最後一個字不能是空白',
+]
+
+const ageRules = [
+  (val: string) => (val !== null && val !== '') || '請輸入年齡',
+  (val: number) => (val > 0 && val <= 120) || '年齡需介於 1 ~ 120 歲',
+]
+
+onBeforeMount(async () => {
+  await refreshData();
+});
+
+async function validateForm() {
+  if (!nameRef.value || !ageRef.value) {
+    alert('something wrong....');
+    return ;
+  }
+
+  const nameValid = await nameRef.value.validate();
+  const ageValid = await ageRef.value.validate();
+
+  return nameValid && ageValid;
 }
+
+async function refreshData() {
+  const response = await userList();
+  blockData.value = response;
+}
+
+async function addUser() {
+  if (!await validateForm()) {
+    return ;
+  }
+  const response = await userCreate({
+    name: tempData.value.name,
+    age: parseInt(tempData.value.age, 10),
+  });
+  console.log(response);
+
+  await refreshData();
+}
+
+async function editUser() {
+  if (!await validateForm()) {
+    return ;
+  }
+  const response = await userUpdate({
+    id: tempData.value.id,
+    name: tempData.value.name,
+    age: parseInt(tempData.value.age, 10),
+  });
+
+  await refreshData();
+
+  console.log(response);
+}
+
+async function  escapeEditMode() {
+  actionMode.value = 'add';
+  tempData.value = {
+    id: '',
+    name: '',
+    age: '',
+  };
+}
+
+async function handleClickOption(btn: btnType, user: UserModel) {
+  if (btn.status === 'edit') {
+
+    actionMode.value = 'edit';
+    console.log('edit', user);
+    tempData.value = {
+      id: user.id,
+      name: user.name,
+      age: `${user.age}`,
+    };
+
+    return ;
+  }
+
+  if (btn.status === 'delete') {
+    Dialog.create({
+      title: '提示',
+      message: '確定要刪除嗎？',
+      cancel: {
+        label: '取消',
+      },
+      ok: {
+        label: '確定',
+      },
+      persistent: true,
+    })
+    .onOk(async () => {
+      console.log('OK');
+      await userDelete(user.id);
+      await refreshData();
+    }).onCancel(() => {
+      console.log('Cancel');
+    }).onDismiss(() => {
+      console.log('I am triggered on both OK and Cancel');
+    })
+    return ;
+  }
+
+}
+
 </script>
 
 <style lang="scss" scoped>
